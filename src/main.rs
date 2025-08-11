@@ -1,8 +1,5 @@
-use std::io::{Read, Write};
-
 use anyhow::Result;
 use dialoguer::Input;
-use flate2::bufread::GzDecoder;
 use grammers_client::{
     Client,
     grammers_tl_types::{
@@ -12,10 +9,9 @@ use grammers_client::{
     },
     session::Session,
 };
-use image::{ImageFormat, RgbaImage};
-use rlottie::{Animation, Surface};
+use image::{EncodableLayout, ImageFormat, imageops::FilterType};
 use serde::Deserialize;
-use tch::CModule;
+use tch::{CModule, Kind, Tensor};
 
 #[derive(Deserialize)]
 struct Config {
@@ -31,7 +27,7 @@ async fn main() -> Result<()> {
 
     let config: Config = envy::from_env()?;
 
-    // let module = CModule::load("encoder")?;
+    let model = CModule::load("encoder")?;
 
     let session_path = "sessions/demo.session";
 
@@ -74,89 +70,45 @@ async fn main() -> Result<()> {
                 0, 104, 152, 172, 174, 230, 186, 218, 83, 75, 125, 217, 165, 58, 177, 245, 249, 35,
                 64, 161, 52,
             ],
-            thumb_size: "".to_string(),
+            thumb_size: "m".to_string(),
         }),
         offset: 0,
         limit: 1024 * 1023,
     };
     let response = client.invoke(&request).await?;
-    tracing::debug!(?response);
+    // tracing::debug!(?response);
 
     let upload::File::File(file) = response else {
         panic!("not a file");
     };
 
-    // let mut out = std::fs::File::create("output/thumb.png")?;
-    // out.write_all(&file.bytes)?;
+    let image = image::load_from_memory_with_format(&file.bytes, ImageFormat::WebP)?;
+    image.save_with_format("output/input.png", ImageFormat::Png)?;
 
-    let now = std::time::Instant::now();
+    let resized = image.resize(224, 224, FilterType::CatmullRom);
+    let rgb = resized.to_rgb8();
 
-    let mut gz = GzDecoder::new(&file.bytes[..]);
+    dbg!(rgb.as_bytes().len());
+    rgb.save_with_format("output/rgb.png", ImageFormat::Png)?;
 
-    let mut animation_data = vec![];
-    gz.read_to_end(&mut animation_data)?;
+    let input = Tensor::from_data_size(rgb.as_bytes(), &[224, 224, 3], Kind::Uint8)
+        .to_kind(Kind::Float)
+        .divide_scalar(255)
+        .permute([2, 0, 1])
+        .unsqueeze(0);
 
-    tracing::debug!(elapsed = ?now.elapsed());
+    let mean = Tensor::from_slice(&[0.485_f32, 0.456, 0.406]).view([1, 3, 1, 1]);
+    let std = Tensor::from_slice(&[0.229_f32, 0.224, 0.225]).view([1, 3, 1, 1]);
+    let input = (input - mean) / std;
 
-    let mut animation =
-        Animation::from_data(animation_data, "5330191715850541636", "").expect("animation is None");
+    input.save("output/input.pt")?;
 
-    let size = animation.size();
+    // dbg!(&input);
 
-    // tracing::debug!(animation_size = ?size);
+    let output = model.forward_ts(&[input])?;
 
-    let mut surface = Surface::new(size);
-
-    animation.render(0, &mut surface);
-
-    // tracing::debug!(len = surface.data_as_bytes().len());
-
-    let mut bgra_data = surface.into_data();
-    for bgra in &mut bgra_data {
-        // bgra -> rgba
-        std::mem::swap(&mut bgra.r, &mut bgra.b);
-    }
-
-    let data = {
-        let ptr = bgra_data.as_mut_ptr() as *mut u8;
-        let len = bgra_data.len() * 4;
-        let capacity = bgra_data.capacity() * 4;
-
-        std::mem::forget(bgra_data);
-
-        unsafe { Vec::from_raw_parts(ptr, len, capacity) }
-    };
-
-    let image =
-        RgbaImage::from_vec(size.width as u32, size.height as u32, data).expect("image is None");
-
-    tracing::debug!(elapsed = ?now.elapsed());
-
-    image.save_with_format("./output/frame.png", ImageFormat::Png)?;
-
-    // let invoice = InputInvoice::StarGift(InputInvoiceStarGift {
-    //     hide_name: false,
-    //     include_upgrade: false,
-    //     peer: InputPeer::PeerSelf,
-    //     gift_id: 5170145012310081615,
-    //     message: None,
-    // });
-
-    // let payment_form = client
-    //     .invoke(&GetPaymentForm {
-    //         invoice: invoice.clone(),
-    //         theme_params: None,
-    //     })
-    //     .await?;
-    // tracing::debug!(?payment_form);
-
-    // let result = client
-    //     .invoke(&SendStarsForm {
-    //         form_id: payment_form.form_id(),
-    //         invoice,
-    //     })
-    //     .await?;
-    // tracing::debug!(?result);
+    let output: Vec<f32> = output.view(-1).try_into()?;
+    dbg!(output);
 
     Ok(())
 }
