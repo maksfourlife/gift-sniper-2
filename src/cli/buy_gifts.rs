@@ -16,7 +16,7 @@ struct Config {
     database_url: String,
 }
 
-pub async fn process(gift_id: i64) -> Result<()> {
+pub async fn process(gift_id: i64, limit: Option<u64>) -> Result<()> {
     let config: Config = envy::from_env()?;
 
     let pool = Arc::new(SqlitePool::connect(&config.database_url).await?);
@@ -42,7 +42,7 @@ pub async fn process(gift_id: i64) -> Result<()> {
         pool.clone(),
         vec![gift_id],
         None,
-        None,
+        limit,
     )
     .await?;
 

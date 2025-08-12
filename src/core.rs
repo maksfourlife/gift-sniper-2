@@ -61,7 +61,7 @@ pub async fn buy_gifts(
             let StarsAmount::Amount(mut stars_amount) = status.balance;
 
             for (&gift_id, &gift_price) in gift_ids.iter().zip(gift_prices.iter()) {
-                for count in 0..limit.unwrap_or(u64::MAX) {
+                for count in 1..=limit.unwrap_or(u64::MAX) {
                     if stars_amount.amount < gift_price {
                         break;
                     }

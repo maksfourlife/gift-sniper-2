@@ -25,6 +25,7 @@ struct Config {
     initial_gifts_hash: i32,
     bot_token: String,
     database_url: String,
+    max_supply: i32,
 }
 
 // 1. authorize all clients
@@ -36,10 +37,7 @@ struct Config {
 //          1. for each gift in sorted by supply:
 //              1. buy to channel
 
-pub async fn process() -> Result<()> {
-    dotenvy::dotenv().ok();
-    tracing_subscriber::fmt::init();
-
+pub async fn process(ignore_not_limited: bool, do_buy: bool, buy_limit: Option<u64>) -> Result<()> {
     let config: Config = envy::from_env()?;
 
     let pool = Arc::new(SqlitePool::connect(&config.database_url).await?);
@@ -65,6 +63,7 @@ pub async fn process() -> Result<()> {
             pool.clone(),
             clients.clone(),
             config.admin_usernames.into(),
+            buy_limit,
         )
         .inspect_err(|err| tracing::error!(?err, "run_bot exited with error")),
     );
@@ -84,22 +83,19 @@ pub async fn process() -> Result<()> {
             gifts_hash = gifts.hash;
 
             // gifts can't be unique here
-            let mut gifts: Vec<_> = gifts
+            let gifts: Vec<_> = gifts
                 .gifts
                 .into_iter()
                 .filter_map(|gift| match gift {
                     StarGift::Gift(gift) => Some(gift),
                     StarGift::Unique(_) => None,
                 })
-                // check limited && availability_total.is_some()
-                .filter(|gift| !gift.sold_out && !seen_gift_ids.contains(&gift.id))
+                .filter(|gift| {
+                    (ignore_not_limited || gift.limited)
+                        && !gift.sold_out
+                        && !seen_gift_ids.contains(&gift.id)
+                })
                 .collect();
-
-            gifts.sort_by_key(|gift| gift.availability_total);
-
-            for gift in &gifts {
-                seen_gift_ids.insert(gift.id);
-            }
 
             tracing::debug!(?gifts);
 
@@ -109,21 +105,39 @@ pub async fn process() -> Result<()> {
                 ),
             );
 
+            let mut gifts: Vec<_> = gifts
+                .into_iter()
+                .filter(|gift| {
+                    gift.availability_total.is_some()
+                        && gift.availability_total.unwrap() <= config.max_supply
+                })
+                .collect();
+
+            gifts.sort_by_key(|gift| gift.availability_total);
+
+            tracing::debug!(filtered_and_sorted_gifts = ?gifts);
+
+            for gift in &gifts {
+                seen_gift_ids.insert(gift.id);
+            }
+
             let gift_ids: Vec<_> = gifts.iter().map(|gift| gift.id).collect();
             let gift_prices_map = gifts.iter().map(|gift| (gift.id, gift.stars)).collect();
 
-            let buy_gifts_result = buy_gifts(
-                &clients,
-                bot.clone(),
-                pool.clone(),
-                gift_ids,
-                Some(&gift_prices_map),
-                None,
-            )
-            .await;
+            if do_buy {
+                let buy_gifts_result = buy_gifts(
+                    &clients,
+                    bot.clone(),
+                    pool.clone(),
+                    gift_ids,
+                    Some(&gift_prices_map),
+                    buy_limit,
+                )
+                .await;
 
-            if let Err(err) = buy_gifts_result {
-                tracing::error!(?err, "failed to buy gifts");
+                if let Err(err) = buy_gifts_result {
+                    tracing::error!(?err, "failed to buy gifts");
+                }
             }
         }
 

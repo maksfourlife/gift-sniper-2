@@ -1,4 +1,4 @@
-use std::{fmt::format, sync::Arc};
+use std::sync::Arc;
 
 use futures::{StreamExt, future::try_join_all};
 use grammers_client::{
@@ -47,6 +47,7 @@ pub async fn run_bot(
     pool: Arc<SqlitePool>,
     clients: Vec<Arc<WrappedClient>>,
     admin_usernames: Arc<[String]>,
+    buy_limit: Option<u64>,
 ) -> Result<()> {
     let clients: Arc<[_]> = clients.into();
 
@@ -70,7 +71,9 @@ pub async fn run_bot(
                 };
 
                 let update_id = update.id.0;
-                if let Err(err) = on_update(bot, pool, clients, admin_usernames, update).await {
+                if let Err(err) =
+                    on_update(bot, pool, clients, admin_usernames, update, buy_limit).await
+                {
                     tracing::debug!(update_id, ?err, "failed to process update");
                 }
             }
@@ -86,6 +89,7 @@ async fn on_update(
     clients: Arc<[Arc<WrappedClient>]>,
     admin_usernames: Arc<[String]>,
     update: Update,
+    buy_limit: Option<u64>,
 ) -> Result<()> {
     tracing::trace!(?update);
 
@@ -140,6 +144,7 @@ async fn on_update(
                     return Ok(());
                 }
             };
+            bot.answer_callback_query(callback_query.id).await?;
             tokio::spawn(async move {
                 buy_gifts(
                     &clients,
@@ -147,7 +152,7 @@ async fn on_update(
                     pool.clone(),
                     vec![gift_id],
                     None,
-                    None,
+                    buy_limit,
                 )
                 .await
                 .inspect_err(|err| tracing::error!(?err, "buy_gifts exited with error"))
@@ -203,14 +208,12 @@ pub async fn notify_gifts(
                             Limited: *{}*\n\n\
                             Stars: *{}* ⭐️\n\n\
                             Supply: *{:?}*\n\
-                            Remains: *{:?}*\n\n
-                            #{}",
+                            Remains: *{:?}*",
                             gift.id,
                             gift.limited,
                             gift.stars,
                             gift.availability_total,
                             gift.availability_remains,
-                            gift.id,
                         );
 
                         let inline_keyboard =
@@ -261,11 +264,11 @@ pub async fn notify_gift_buy_status(
     gift_id: i64,
     status: GiftBuyStatus,
 ) -> Result<()> {
-    let chats: Arc<[i64]> = get_chats(&*pool).await?.into();
+    let chats: Arc<[i64]> = get_chats(pool).await?.into();
 
     let title = match status {
-        GiftBuyStatus::PaymentFormError(err) => format!("❌ Error(PaymentForm): {err}"),
-        GiftBuyStatus::SendStarsFormError(err) => format!("❌ Error(SendStarsForm): {err}"),
+        GiftBuyStatus::PaymentFormError(err) => format!("❌ Error\\(PaymentForm\\): {err}"),
+        GiftBuyStatus::SendStarsFormError(err) => format!("❌ Error\\(SendStarsForm\\): {err}"),
         GiftBuyStatus::Success => "✅ Gift bought".to_string(),
     };
 
@@ -273,9 +276,10 @@ pub async fn notify_gift_buy_status(
         let text = format!(
             "{title}\n\n\
             Count: *{count}*\n\
-            Phone Number: *{phone_number}*\n\
+            Phone Number: *{}*\n\
             Balance: {balance} ⭐️\n\
-            GiftId: #{gift_id}"
+            ID: `{gift_id}`",
+            phone_number.replace("+", "\\+")
         );
         bot.send_message(ChatId(*chat_id), text)
             .parse_mode(ParseMode::MarkdownV2)
