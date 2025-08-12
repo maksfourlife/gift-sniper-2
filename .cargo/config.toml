@@ -1,5 +1,0 @@
-[env]
-LIBTORCH = "/usr/local/lib/libtorch"
-
-[build]
-rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/local/lib/libtorch/lib"]

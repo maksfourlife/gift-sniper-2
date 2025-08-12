@@ -1,6 +1,4 @@
 /target
 
-/encoder
-/sessions
-/output
+/db
 /.env
