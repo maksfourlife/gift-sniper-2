@@ -40,6 +40,12 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+#[derive(Debug, Clone)]
+pub enum BuyGiftsDestination {
+    PeerSelf,
+    Channel(MaybeResolvedChannel),
+}
+
 // expects `gift_ids` to be sorted by priority
 pub async fn buy_gifts(
     clients: &[Arc<WrappedClient>],
@@ -48,11 +54,18 @@ pub async fn buy_gifts(
     gift_ids: Vec<i64>,
     gift_prices_map: Option<&BTreeMap<i64, i64>>,
     limit: Option<u64>,
-    dest_channel: &MaybeResolvedChannel,
+    dest: &BuyGiftsDestination,
 ) -> Result<()> {
+    let limit = limit.unwrap_or(100);
+
     let first_client = clients.first().expect("expected at least one client");
 
-    let dest_peer = dest_channel.resolve(first_client).await?;
+    let _dest_peer = match dest {
+        BuyGiftsDestination::PeerSelf => InputPeer::PeerSelf,
+        BuyGiftsDestination::Channel(channel) => {
+            InputPeer::Channel(channel.resolve(first_client).await?)
+        }
+    };
 
     let gift_ids: Arc<[_]> = gift_ids.into();
     let gift_prices = get_gift_prices(first_client, &gift_ids, gift_prices_map).await?;
@@ -62,7 +75,7 @@ pub async fn buy_gifts(
         let pool = pool.clone();
         let gift_ids = gift_ids.clone();
         let gift_prices = gift_prices.clone();
-        let dest_peer = dest_peer.clone();
+        // let dest_peer = dest_peer.clone();
 
         async move {
             let StarsStatus::Status(status) = client
@@ -74,7 +87,7 @@ pub async fn buy_gifts(
             let StarsAmount::Amount(mut stars_amount) = status.balance;
 
             for (&gift_id, &gift_price) in gift_ids.iter().zip(gift_prices.iter()) {
-                for count in 1..=limit.unwrap_or(u64::MAX) {
+                for count in 1..=limit {
                     if stars_amount.amount < gift_price {
                         break;
                     }
@@ -90,7 +103,8 @@ pub async fn buy_gifts(
                     let invoice = InputInvoice::StarGift(InputInvoiceStarGift {
                         hide_name: false,
                         include_upgrade: false,
-                        peer: InputPeer::Channel(dest_peer.clone()), // TODO: channel
+                        // peer: InputPeer::Channel(dest_peer.clone()), // TODO: channel
+                        peer: InputPeer::PeerSelf,
                         gift_id,
                         message: None,
                     });

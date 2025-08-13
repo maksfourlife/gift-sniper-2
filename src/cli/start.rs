@@ -12,7 +12,7 @@ use teloxide::Bot;
 
 use crate::{
     bot::{notify_gifts, run_bot},
-    core::{MaybeResolvedChannel, buy_gifts},
+    core::{BuyGiftsDestination, buy_gifts},
     wrapped_client::WrappedClient,
 };
 
@@ -26,7 +26,7 @@ struct Config {
     bot_token: String,
     database_url: String,
     max_supply: i32,
-    dest_channel_username: String,
+    // dest_channel_username: String,
 }
 
 // 1. authorize all clients
@@ -63,11 +63,12 @@ pub async fn process(ignore_not_limited: bool, do_buy: bool, buy_limit: Option<u
         .cloned()
         .expect("expected at least one client");
 
-    let dest_channel = Arc::new(
-        MaybeResolvedChannel::Username(config.dest_channel_username)
-            .as_resolved(&client)
-            .await?,
-    );
+    // let destination = Arc::new(
+    //     MaybeResolvedChannel::Username(config.dest_channel_username)
+    //         .as_resolved(&client)
+    //         .await?,
+    // );
+    let buy_dest = Arc::new(BuyGiftsDestination::PeerSelf);
 
     let _bot_handle = tokio::spawn(
         run_bot(
@@ -76,7 +77,7 @@ pub async fn process(ignore_not_limited: bool, do_buy: bool, buy_limit: Option<u
             clients.clone(),
             config.admin_usernames.into(),
             buy_limit,
-            dest_channel.clone(),
+            buy_dest.clone(),
         )
         .inspect_err(|err| tracing::error!(?err, "run_bot exited with error")),
     );
@@ -143,7 +144,7 @@ pub async fn process(ignore_not_limited: bool, do_buy: bool, buy_limit: Option<u
                     gift_ids,
                     Some(&gift_prices_map),
                     buy_limit,
-                    &dest_channel,
+                    &buy_dest,
                 )
                 .await;
 

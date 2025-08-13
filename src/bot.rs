@@ -26,7 +26,7 @@ use teloxide::{
 };
 
 use crate::{
-    core::{MaybeResolvedChannel, buy_gifts},
+    core::{BuyGiftsDestination, MaybeResolvedChannel, buy_gifts},
     db::{self, get_chats, insert_chat},
     wrapped_client::WrappedClient,
 };
@@ -51,7 +51,7 @@ pub async fn run_bot(
     clients: Vec<Arc<WrappedClient>>,
     admin_usernames: Arc<[String]>,
     buy_limit: Option<u64>,
-    dest_channel: Arc<MaybeResolvedChannel>,
+    buy_dest: Arc<BuyGiftsDestination>,
 ) -> Result<()> {
     let clients: Arc<[_]> = clients.into();
 
@@ -64,7 +64,7 @@ pub async fn run_bot(
             let pool = pool.clone();
             let clients = clients.clone();
             let admin_usernames = admin_usernames.clone();
-            let dest_channel = dest_channel.clone();
+            let buy_dest = buy_dest.clone();
 
             async move {
                 let update = match update {
@@ -83,7 +83,7 @@ pub async fn run_bot(
                     admin_usernames,
                     update,
                     buy_limit,
-                    dest_channel,
+                    buy_dest,
                 )
                 .await
                 {
@@ -103,7 +103,7 @@ async fn on_update(
     admin_usernames: Arc<[String]>,
     update: Update,
     buy_limit: Option<u64>,
-    dest_channel: Arc<MaybeResolvedChannel>,
+    buy_dest: Arc<BuyGiftsDestination>,
 ) -> Result<()> {
     tracing::trace!(?update);
 
@@ -167,7 +167,7 @@ async fn on_update(
                     vec![gift_id],
                     None,
                     buy_limit,
-                    &dest_channel,
+                    &buy_dest,
                 )
                 .await
                 .inspect_err(|err| tracing::error!(?err, "buy_gifts exited with error"))
@@ -218,9 +218,12 @@ pub async fn notify_gifts(
                     // let span = tracing::info_span!("notify_gift", gift_id = gift.id);
                     // let _guard = span.enter();
 
-                    let file = client.invoke(&request).await.inspect_err(|err| {
-                        tracing::error!(?err, gift_id = gift.id, "failed to get file")
-                    })?;
+                    let file = client
+                        .invoke_in_dc(&request, document.dc_id)
+                        .await
+                        .inspect_err(|err| {
+                            tracing::error!(?err, gift_id = gift.id, "failed to get file")
+                        })?;
 
                     if let File::File(file) = file {
                         let caption = format!(

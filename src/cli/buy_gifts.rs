@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 use teloxide::Bot;
 
 use crate::{
-    core::{MaybeResolvedChannel, buy_gifts},
+    core::{BuyGiftsDestination, buy_gifts},
     wrapped_client::WrappedClient,
 };
 
@@ -17,7 +17,7 @@ struct Config {
     phone_numbers: Vec<String>,
     bot_token: String,
     database_url: String,
-    dest_channel_username: String,
+    // dest_channel_username: String,
 }
 
 pub async fn process(gift_id: i64, limit: Option<u64>) -> Result<()> {
@@ -40,6 +40,9 @@ pub async fn process(gift_id: i64, limit: Option<u64>) -> Result<()> {
         ));
     }
 
+    // let dest = MaybeResolvedChannel::Username(config.dest_channel_username);
+    let buy_dest = BuyGiftsDestination::PeerSelf;
+
     buy_gifts(
         &clients,
         bot.clone(),
@@ -47,7 +50,7 @@ pub async fn process(gift_id: i64, limit: Option<u64>) -> Result<()> {
         vec![gift_id],
         None,
         limit,
-        &MaybeResolvedChannel::Username(config.dest_channel_username),
+        &buy_dest,
     )
     .await?;
 
