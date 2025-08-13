@@ -39,6 +39,8 @@ struct Config {
 //              1. buy to channel
 
 pub async fn process(ignore_not_limited: bool, do_buy: bool, buy_limit: Option<u64>) -> Result<()> {
+    tracing::debug!(ignore_not_limited, do_buy, buy_limit);
+
     let config: Config = envy::from_env()?;
 
     let pool = Arc::new(SqlitePool::connect(&config.database_url).await?);

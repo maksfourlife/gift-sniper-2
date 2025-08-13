@@ -70,6 +70,8 @@ pub async fn buy_gifts(
     let gift_ids: Arc<[_]> = gift_ids.into();
     let gift_prices = get_gift_prices(first_client, &gift_ids, gift_prices_map).await?;
 
+    tracing::debug!(?gift_ids, ?gift_prices, "buy_gifts");
+
     try_join_all(clients.iter().map(|client| {
         let bot = bot.clone();
         let pool = pool.clone();
@@ -83,6 +85,7 @@ pub async fn buy_gifts(
                     peer: InputPeer::PeerSelf,
                 })
                 .await?;
+            tracing::debug!(?status, phone_number = client.phone_number());
 
             let StarsAmount::Amount(mut stars_amount) = status.balance;
 
@@ -115,6 +118,7 @@ pub async fn buy_gifts(
                             theme_params: None,
                         })
                         .await;
+                    tracing::debug!(?get_payment_form_result);
 
                     let payment_form = match get_payment_form_result {
                         Ok(t) => t,
@@ -140,6 +144,7 @@ pub async fn buy_gifts(
                             invoice,
                         })
                         .await;
+                    tracing::debug!(?send_stars_form_result);
 
                     let status = match send_stars_form_result {
                         Ok(_) => {
@@ -153,7 +158,7 @@ pub async fn buy_gifts(
                         }
                     };
 
-                    notify_gift_buy_status(
+                    let notify_gift_buy_status_result = notify_gift_buy_status(
                         &bot,
                         &pool,
                         count,
@@ -162,7 +167,11 @@ pub async fn buy_gifts(
                         gift_id,
                         status,
                     )
-                    .await?;
+                    .await;
+
+                    if let Err(err) = notify_gift_buy_status_result {
+                        tracing::error!(?err, "failed to notify gift buy status");
+                    }
                 }
             }
 
