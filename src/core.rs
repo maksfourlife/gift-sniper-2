@@ -1,13 +1,16 @@
 use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
 use futures::future::try_join_all;
-use grammers_client::grammers_tl_types::{
-    enums::{
-        InputInvoice, InputPeer, StarGift, StarsAmount,
-        payments::{StarGifts, StarsStatus},
+use grammers_client::{
+    grammers_tl_types::{
+        enums::{
+            InputInvoice, InputPeer, StarGift, StarsAmount,
+            payments::{StarGifts, StarsStatus},
+        },
+        functions::payments::{GetPaymentForm, GetStarGifts, GetStarsStatus, SendStarsForm},
+        types::{InputInvoiceStarGift, InputPeerChannel},
     },
-    functions::payments::{GetPaymentForm, GetStarGifts, GetStarsStatus, SendStarsForm},
-    types::InputInvoiceStarGift,
+    types::Chat,
 };
 use sqlx::SqlitePool;
 use teloxide::Bot;
@@ -27,6 +30,12 @@ pub enum Error {
     GiftPriceNotFound(i64),
     #[error("unexpected not modified")]
     UnexpectedNotModified,
+    #[error("chat not found (username = {0})")]
+    ChatNotFound(String),
+    #[error("chat is not a channel")]
+    ChatIsNotChannel,
+    #[error("channel not accesible (channel_id = {0})")]
+    ChannelNotAccessible(i64),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -39,8 +48,11 @@ pub async fn buy_gifts(
     gift_ids: Vec<i64>,
     gift_prices_map: Option<&BTreeMap<i64, i64>>,
     limit: Option<u64>,
+    dest_channel: &MaybeResolvedChannel,
 ) -> Result<()> {
     let first_client = clients.first().expect("expected at least one client");
+
+    let dest_peer = dest_channel.resolve(first_client).await?;
 
     let gift_ids: Arc<[_]> = gift_ids.into();
     let gift_prices = get_gift_prices(first_client, &gift_ids, gift_prices_map).await?;
@@ -50,6 +62,7 @@ pub async fn buy_gifts(
         let pool = pool.clone();
         let gift_ids = gift_ids.clone();
         let gift_prices = gift_prices.clone();
+        let dest_peer = dest_peer.clone();
 
         async move {
             let StarsStatus::Status(status) = client
@@ -77,7 +90,7 @@ pub async fn buy_gifts(
                     let invoice = InputInvoice::StarGift(InputInvoiceStarGift {
                         hide_name: false,
                         include_upgrade: false,
-                        peer: InputPeer::PeerSelf, // TODO: channel
+                        peer: InputPeer::Channel(dest_peer.clone()), // TODO: channel
                         gift_id,
                         message: None,
                     });
@@ -184,4 +197,45 @@ async fn get_gift_prices(
                 .ok_or(Error::GiftPriceNotFound(*gift_id))
         })
         .collect::<Result<Arc<[_]>, _>>()
+}
+
+#[derive(Debug, Clone)]
+pub enum MaybeResolvedChannel {
+    Username(String),
+    Peer(InputPeerChannel),
+}
+
+impl MaybeResolvedChannel {
+    pub async fn as_resolved(&self, client: &grammers_client::Client) -> Result<Self> {
+        self.resolve(client).await.map(Self::Peer)
+    }
+
+    pub async fn resolve(&self, client: &grammers_client::Client) -> Result<InputPeerChannel> {
+        Ok(match self {
+            Self::Username(username) => {
+                let chat = client
+                    .resolve_username(username)
+                    .await?
+                    .ok_or_else(|| Error::ChatNotFound(username.to_string()))?;
+
+                tracing::debug!(username, resolved_chat = ?chat);
+
+                let channel = match chat {
+                    Chat::Channel(channel) => channel,
+                    _ => return Err(Error::ChatIsNotChannel),
+                };
+
+                let access_hash = channel
+                    .raw
+                    .access_hash
+                    .ok_or(Error::ChannelNotAccessible(channel.raw.id))?;
+
+                InputPeerChannel {
+                    channel_id: channel.raw.id,
+                    access_hash,
+                }
+            }
+            Self::Peer(peer) => peer.clone(),
+        })
+    }
 }

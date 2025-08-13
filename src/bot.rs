@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use futures::{StreamExt, future::try_join_all};
+use futures::{
+    StreamExt,
+    future::{join_all, try_join_all},
+};
 use grammers_client::{
     InvocationError,
     grammers_tl_types::{
@@ -23,7 +26,7 @@ use teloxide::{
 };
 
 use crate::{
-    core::buy_gifts,
+    core::{MaybeResolvedChannel, buy_gifts},
     db::{self, get_chats, insert_chat},
     wrapped_client::WrappedClient,
 };
@@ -48,6 +51,7 @@ pub async fn run_bot(
     clients: Vec<Arc<WrappedClient>>,
     admin_usernames: Arc<[String]>,
     buy_limit: Option<u64>,
+    dest_channel: Arc<MaybeResolvedChannel>,
 ) -> Result<()> {
     let clients: Arc<[_]> = clients.into();
 
@@ -60,6 +64,7 @@ pub async fn run_bot(
             let pool = pool.clone();
             let clients = clients.clone();
             let admin_usernames = admin_usernames.clone();
+            let dest_channel = dest_channel.clone();
 
             async move {
                 let update = match update {
@@ -71,8 +76,16 @@ pub async fn run_bot(
                 };
 
                 let update_id = update.id.0;
-                if let Err(err) =
-                    on_update(bot, pool, clients, admin_usernames, update, buy_limit).await
+                if let Err(err) = on_update(
+                    bot,
+                    pool,
+                    clients,
+                    admin_usernames,
+                    update,
+                    buy_limit,
+                    dest_channel,
+                )
+                .await
                 {
                     tracing::debug!(update_id, ?err, "failed to process update");
                 }
@@ -90,6 +103,7 @@ async fn on_update(
     admin_usernames: Arc<[String]>,
     update: Update,
     buy_limit: Option<u64>,
+    dest_channel: Arc<MaybeResolvedChannel>,
 ) -> Result<()> {
     tracing::trace!(?update);
 
@@ -153,6 +167,7 @@ async fn on_update(
                     vec![gift_id],
                     None,
                     buy_limit,
+                    &dest_channel,
                 )
                 .await
                 .inspect_err(|err| tracing::error!(?err, "buy_gifts exited with error"))
@@ -172,7 +187,7 @@ pub async fn notify_gifts(
 ) -> Result<()> {
     let chats: Arc<[i64]> = get_chats(&*pool).await?.into();
 
-    try_join_all(
+    join_all(
         gifts
             .iter()
             .filter_map(|gift| match &gift.sticker {
@@ -200,7 +215,12 @@ pub async fn notify_gifts(
                 let chats = chats.clone();
 
                 async move {
-                    let file = client.invoke(&request).await?;
+                    // let span = tracing::info_span!("notify_gift", gift_id = gift.id);
+                    // let _guard = span.enter();
+
+                    let file = client.invoke(&request).await.inspect_err(|err| {
+                        tracing::error!(?err, gift_id = gift.id, "failed to get file")
+                    })?;
 
                     if let File::File(file) = file {
                         let caption = format!(
@@ -235,6 +255,13 @@ pub async fn notify_gifts(
                                     .reply_markup(inline_keyboard)
                                     .parse_mode(ParseMode::MarkdownV2)
                                     .await
+                                    .inspect_err(|err| {
+                                        tracing::error!(
+                                            ?err,
+                                            gift_id = gift.id,
+                                            "failed to send photo"
+                                        )
+                                    })
                             }
                         }))
                         .await?;
@@ -244,7 +271,8 @@ pub async fn notify_gifts(
                 }
             }),
     )
-    .await?;
+    .await;
+
     Ok(())
 }
 
@@ -266,6 +294,11 @@ pub async fn notify_gift_buy_status(
 ) -> Result<()> {
     let chats: Arc<[i64]> = get_chats(pool).await?.into();
 
+    let use_markdown_v2 = match status {
+        GiftBuyStatus::PaymentFormError(_) | GiftBuyStatus::SendStarsFormError(_) => false,
+        GiftBuyStatus::Success => true,
+    };
+
     let title = match status {
         GiftBuyStatus::PaymentFormError(err) => format!("❌ Error\\(PaymentForm\\): {err}"),
         GiftBuyStatus::SendStarsFormError(err) => format!("❌ Error\\(SendStarsForm\\): {err}"),
@@ -281,9 +314,11 @@ pub async fn notify_gift_buy_status(
             ID: `{gift_id}`",
             phone_number.replace("+", "\\+")
         );
-        bot.send_message(ChatId(*chat_id), text)
-            .parse_mode(ParseMode::MarkdownV2)
-            .into_future()
+        let mut builder = bot.send_message(ChatId(*chat_id), text);
+        if use_markdown_v2 {
+            builder = builder.parse_mode(ParseMode::MarkdownV2)
+        }
+        builder.into_future()
     }))
     .await?;
 

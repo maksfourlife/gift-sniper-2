@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod buy_gifts;
+mod login;
 mod start;
 
 #[derive(Debug, Parser)]
@@ -14,6 +15,7 @@ pub struct Cli {
 enum Command {
     Start(Start),
     BuyGift(BuyGift),
+    Login,
 }
 
 #[derive(Debug, Parser)]
@@ -21,7 +23,7 @@ struct Start {
     #[clap(long)]
     ignore_not_limited: bool,
     #[clap(long)]
-    do_buy: bool,
+    buy: bool,
     #[clap(long)]
     buy_limit: Option<u64>,
 }
@@ -37,12 +39,13 @@ impl Cli {
         match self.command {
             Command::Start(Start {
                 ignore_not_limited,
-                do_buy,
+                buy,
                 buy_limit,
-            }) => start::process(ignore_not_limited, do_buy, buy_limit).await,
+            }) => start::process(ignore_not_limited, buy, buy_limit).await,
             Command::BuyGift(BuyGift { gift_id, limit }) => {
                 buy_gifts::process(gift_id, limit).await
             }
+            Command::Login => login::process().await,
         }
     }
 }

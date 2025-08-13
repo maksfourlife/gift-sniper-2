@@ -5,7 +5,10 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use teloxide::Bot;
 
-use crate::{core::buy_gifts, wrapped_client::WrappedClient};
+use crate::{
+    core::{MaybeResolvedChannel, buy_gifts},
+    wrapped_client::WrappedClient,
+};
 
 #[derive(Deserialize)]
 struct Config {
@@ -14,6 +17,7 @@ struct Config {
     phone_numbers: Vec<String>,
     bot_token: String,
     database_url: String,
+    dest_channel_username: String,
 }
 
 pub async fn process(gift_id: i64, limit: Option<u64>) -> Result<()> {
@@ -43,6 +47,7 @@ pub async fn process(gift_id: i64, limit: Option<u64>) -> Result<()> {
         vec![gift_id],
         None,
         limit,
+        &MaybeResolvedChannel::Username(config.dest_channel_username),
     )
     .await?;
 

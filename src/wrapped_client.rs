@@ -1,7 +1,7 @@
 use std::{ops::Deref, sync::Arc};
 
 use dialoguer::Input;
-use grammers_client::{Client, session::Session};
+use grammers_client::{Client, SignInError, session::Session};
 use sqlx::SqlitePool;
 
 use crate::db::{self, get_session, insert_or_replace_session};
@@ -61,7 +61,20 @@ impl WrappedClient {
                 .with_prompt(format!("Please enter login code for {}", this.phone_number))
                 .interact()?;
 
-            this.client.sign_in(&login_token, &login_code).await?;
+            let sing_in_result = this.client.sign_in(&login_token, &login_code).await;
+
+            match sing_in_result {
+                Err(SignInError::PasswordRequired(password_token)) => {
+                    let password: String = Input::new()
+                        .with_prompt(format!("Please enter password for {}", this.phone_number))
+                        .interact()?;
+
+                    this.client.check_password(password_token, password).await?;
+                }
+                result => {
+                    result?;
+                }
+            }
 
             this.sync_session().await?;
         }
