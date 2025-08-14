@@ -141,19 +141,24 @@ pub async fn process(ignore_not_limited: bool, do_buy: bool, buy_limit: Option<u
             tracing::debug!(?gift_ids);
 
             if !gift_ids.is_empty() && do_buy {
-                let buy_gifts_result = buy_gifts(
-                    &clients,
-                    bot.clone(),
-                    pool.clone(),
-                    gift_ids,
-                    Some(&gift_prices_map),
-                    buy_limit,
-                    &buy_dest,
-                )
-                .await;
+                for i in 0..10 {
+                    let buy_gifts_result = buy_gifts(
+                        &clients,
+                        bot.clone(),
+                        pool.clone(),
+                        gift_ids.clone(),
+                        Some(&gift_prices_map),
+                        buy_limit,
+                        &buy_dest,
+                    )
+                    .await;
 
-                if let Err(err) = buy_gifts_result {
-                    tracing::error!(?err, "failed to buy gifts");
+                    match buy_gifts_result {
+                        Err(err) => {
+                            tracing::error!(?err, i, "failed to buy gifts");
+                        }
+                        Ok(()) => break,
+                    }
                 }
             }
         }

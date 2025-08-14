@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
-use futures::{TryFutureExt, future::try_join_all};
+use futures::{TryFutureExt, future::join_all};
 use grammers_client::{
     grammers_tl_types::{
         enums::{
@@ -72,7 +72,7 @@ pub async fn buy_gifts(
 
     tracing::debug!(?gift_ids, ?gift_prices, "buy_gifts");
 
-    try_join_all(clients.iter().map(|client| {
+    let results = join_all(clients.iter().map(|client| {
         let bot = bot.clone();
         let pool = pool.clone();
         let gift_ids = gift_ids.clone();
@@ -95,13 +95,15 @@ pub async fn buy_gifts(
                         break;
                     }
 
-                    let span = tracing::info_span!(
-                        "buy_gift",
-                        gift_id,
-                        count,
-                        phone_number = client.phone_number(),
-                    );
-                    let _guard = span.enter();
+                    let phone_number = client.phone_number().to_string();
+
+                    // let span = tracing::info_span!(
+                    //     "buy_gift",
+                    //     gift_id,
+                    //     count,
+                    //     phone_number = client.phone_number(),
+                    // );
+                    // let _guard = span.enter();
 
                     let invoice = InputInvoice::StarGift(InputInvoiceStarGift {
                         hide_name: false,
@@ -134,8 +136,14 @@ pub async fn buy_gifts(
                                     gift_id,
                                     GiftBuyStatus::PaymentFormError(err),
                                 )
-                                .inspect_err(|err| {
-                                    tracing::error!(?err, "failed to notify gift buy status")
+                                .inspect_err(move |err| {
+                                    tracing::error!(
+                                        ?err,
+                                        gift_id,
+                                        count,
+                                        phone_number,
+                                        "failed to notify gift buy status"
+                                    )
                                 }),
                             );
                             continue;
@@ -157,7 +165,13 @@ pub async fn buy_gifts(
                             GiftBuyStatus::Success
                         }
                         Err(err) => {
-                            tracing::error!(?err, "failed to send stars form");
+                            tracing::error!(
+                                ?err,
+                                gift_id,
+                                count,
+                                phone_number,
+                                "failed to send stars form"
+                            );
                             GiftBuyStatus::SendStarsFormError(err)
                         }
                     };
@@ -172,8 +186,14 @@ pub async fn buy_gifts(
                             gift_id,
                             status,
                         )
-                        .inspect_err(|err| {
-                            tracing::error!(?err, "failed to notify gift buy status")
+                        .inspect_err(move |err| {
+                            tracing::error!(
+                                ?err,
+                                gift_id,
+                                count,
+                                phone_number,
+                                "failed to notify gift buy status"
+                            )
                         }),
                     );
                 }
@@ -182,7 +202,9 @@ pub async fn buy_gifts(
             Result::<_, Error>::Ok(())
         }
     }))
-    .await?;
+    .await;
+
+    tracing::debug!(?results, "send_gifts");
 
     Ok(())
 }

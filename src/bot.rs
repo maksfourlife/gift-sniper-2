@@ -16,12 +16,9 @@ use grammers_client::{
 use sqlx::SqlitePool;
 use teloxide::{
     Bot,
-    payloads::{SendMessageSetters, SendPhotoSetters},
+    payloads::SendPhotoSetters,
     prelude::Requester,
-    types::{
-        ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode, Update,
-        UpdateKind,
-    },
+    types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update, UpdateKind},
     update_listeners::{AsUpdateStream, polling_default},
 };
 
@@ -256,7 +253,7 @@ pub async fn notify_gifts(
                                 bot.send_photo(ChatId(*chat_id), input_file)
                                     .caption(caption)
                                     .reply_markup(inline_keyboard)
-                                    .parse_mode(ParseMode::MarkdownV2)
+                                    // .parse_mode(ParseMode::MarkdownV2)
                                     .await
                                     .inspect_err(|err| {
                                         tracing::error!(
@@ -297,10 +294,10 @@ pub async fn notify_gift_buy_status(
 ) -> Result<()> {
     let chats: Arc<[i64]> = get_chats(&*pool).await?.into();
 
-    let use_markdown_v2 = match status {
-        GiftBuyStatus::PaymentFormError(_) | GiftBuyStatus::SendStarsFormError(_) => false,
-        GiftBuyStatus::Success => true,
-    };
+    // let use_markdown_v2 = match status {
+    //     GiftBuyStatus::PaymentFormError(_) | GiftBuyStatus::SendStarsFormError(_) => false,
+    //     GiftBuyStatus::Success => true,
+    // };
 
     let title = match status {
         GiftBuyStatus::PaymentFormError(err) => format!("❌ Error\\(PaymentForm\\): {err}"),
@@ -318,9 +315,9 @@ pub async fn notify_gift_buy_status(
             phone_number.replace("+", "\\+")
         );
         let mut builder = bot.send_message(ChatId(*chat_id), text);
-        if use_markdown_v2 {
-            builder = builder.parse_mode(ParseMode::MarkdownV2)
-        }
+        // if use_markdown_v2 {
+        //     builder = builder.parse_mode(ParseMode::MarkdownV2)
+        // }
         builder.into_future()
     }))
     .await?;
