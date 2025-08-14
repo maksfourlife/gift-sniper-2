@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
-use futures::future::try_join_all;
+use futures::{TryFutureExt, future::try_join_all};
 use grammers_client::{
     grammers_tl_types::{
         enums::{
@@ -124,16 +124,20 @@ pub async fn buy_gifts(
                         Ok(t) => t,
                         Err(err) => {
                             tracing::error!(?err, "failed to get payment form");
-                            notify_gift_buy_status(
-                                &bot,
-                                &pool,
-                                count,
-                                client.phone_number(),
-                                stars_amount.amount,
-                                gift_id,
-                                GiftBuyStatus::PaymentFormError(err),
-                            )
-                            .await?;
+                            tokio::spawn(
+                                notify_gift_buy_status(
+                                    bot.clone(),
+                                    pool.clone(),
+                                    count,
+                                    client.phone_number().to_string(),
+                                    stars_amount.amount,
+                                    gift_id,
+                                    GiftBuyStatus::PaymentFormError(err),
+                                )
+                                .inspect_err(|err| {
+                                    tracing::error!(?err, "failed to notify gift buy status")
+                                }),
+                            );
                             continue;
                         }
                     };
@@ -158,20 +162,20 @@ pub async fn buy_gifts(
                         }
                     };
 
-                    let notify_gift_buy_status_result = notify_gift_buy_status(
-                        &bot,
-                        &pool,
-                        count,
-                        client.phone_number(),
-                        stars_amount.amount,
-                        gift_id,
-                        status,
-                    )
-                    .await;
-
-                    if let Err(err) = notify_gift_buy_status_result {
-                        tracing::error!(?err, "failed to notify gift buy status");
-                    }
+                    tokio::spawn(
+                        notify_gift_buy_status(
+                            bot.clone(),
+                            pool.clone(),
+                            count,
+                            client.phone_number().to_string(),
+                            stars_amount.amount,
+                            gift_id,
+                            status,
+                        )
+                        .inspect_err(|err| {
+                            tracing::error!(?err, "failed to notify gift buy status")
+                        }),
+                    );
                 }
             }
 

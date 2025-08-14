@@ -20,3 +20,4 @@ thiserror = "2.0.12"
 futures = "0.3.31"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite"] }
 clap = { version = "4.5.44", features = ["derive"] }
+tracing-appender = "0.2.3"

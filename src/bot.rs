@@ -26,7 +26,7 @@ use teloxide::{
 };
 
 use crate::{
-    core::{BuyGiftsDestination, MaybeResolvedChannel, buy_gifts},
+    core::{BuyGiftsDestination, buy_gifts},
     db::{self, get_chats, insert_chat},
     wrapped_client::WrappedClient,
 };
@@ -287,15 +287,15 @@ pub enum GiftBuyStatus {
 }
 
 pub async fn notify_gift_buy_status(
-    bot: &Bot,
-    pool: &SqlitePool,
+    bot: Arc<Bot>,
+    pool: Arc<SqlitePool>,
     count: u64,
-    phone_number: &str,
+    phone_number: String,
     balance: i64,
     gift_id: i64,
     status: GiftBuyStatus,
 ) -> Result<()> {
-    let chats: Arc<[i64]> = get_chats(pool).await?.into();
+    let chats: Arc<[i64]> = get_chats(&*pool).await?.into();
 
     let use_markdown_v2 = match status {
         GiftBuyStatus::PaymentFormError(_) | GiftBuyStatus::SendStarsFormError(_) => false,

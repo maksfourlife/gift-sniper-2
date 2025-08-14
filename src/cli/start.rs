@@ -138,7 +138,7 @@ pub async fn process(ignore_not_limited: bool, do_buy: bool, buy_limit: Option<u
             let gift_ids: Vec<_> = gifts.iter().map(|gift| gift.id).collect();
             let gift_prices_map = gifts.iter().map(|gift| (gift.id, gift.stars)).collect();
 
-            if do_buy {
+            if !gift_ids.is_empty() && do_buy {
                 let buy_gifts_result = buy_gifts(
                     &clients,
                     bot.clone(),
